@@ -54,5 +54,11 @@ Door-log rows carry `captureTime`, `relayName`, `initiator`, `lockAction`, `picU
 
 ## Video
 
-Not carried over HTTP. Candidate sources from login and `userconf`: `vrtsps_server` / `vrtsp_server`
-host, device `mac`, `rtsp_pwd`, `rtsp_nonce`.
+| URL | Transport | Result |
+|---|---|---|
+| `rtsp://ak:<rtsp_pwd>@<vrtsp_server>/<MAC>` | UDP | H.264 Baseline 640x480 30 fps |
+| `rtsp://ak:<rtsp_pwd>@<rtmp_server host>:554/<MAC>` | UDP | same stream |
+| either, or `rtsps://…@<vrtsps_server>/<MAC>` | TCP | refused (`Invalid data`) |
+
+`rtsp_pwd` is the door unit's entry in `userconf`; relay hosts come from login or `gate/servers_list`.
+The door unit's own LAN RTSP (`/live/ch00_0`) does not accept these credentials.
