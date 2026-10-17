@@ -1,12 +1,10 @@
-import { createDecipheriv, createHash } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
 export const GATE = 'https://gate.ecloud.akuvox.com:8600';
-const USER_AGENT = 'VBell/6.61.2 (iPhone; iOS 16.6; Scale/3.00)';
-const RESPONSE_KEY_SUFFIX = 'Akuvox55069013!@';
-const RESPONSE_IV = '1234567887654321';
+const USER_AGENT = 'VBell/7.51.3 (iPad; iOS 26.6; Scale/2.00)';
 
 export const STATE_DIR = join(homedir(), '.akuvox');
 const CREDENTIALS_FILE = join(STATE_DIR, 'credentials');
@@ -19,6 +17,9 @@ export interface Credentials {
 
 export interface Session {
   token: string;
+  refreshToken: string;
+  tokenValidSeconds: number;
+  idCode?: string;
   restServer: string;
   rtmpServer?: string;
   obtainedAt: string;
@@ -32,8 +33,12 @@ export function readCredentials(): Credentials {
   return { user, password };
 }
 
-export function readSession(): Session {
-  return JSON.parse(readFileSync(SESSION_FILE, 'utf8')) as Session;
+export function readSession(): Session | undefined {
+  try {
+    return JSON.parse(readFileSync(SESSION_FILE, 'utf8')) as Session;
+  } catch {
+    return undefined;
+  }
 }
 
 export function writeSession(session: Session): void {
@@ -42,8 +47,7 @@ export function writeSession(session: Session): void {
   chmodSync(SESSION_FILE, 0o600);
 }
 
-const md5 = (input: string): Buffer => createHash('md5').update(input, 'utf8').digest();
-export const md5Hex = (input: string): string => md5(input).toString('hex');
+export const md5Hex = (input: string): string => createHash('md5').update(input, 'utf8').digest('hex');
 
 export function caesarShift(input: string, key = 3): string {
   return input.replace(/[a-z]|[A-Z]|[0-9]/g, (chr) => {
@@ -54,10 +58,9 @@ export function caesarShift(input: string, key = 3): string {
   });
 }
 
-export function decryptLoginResponse(user: string, body: string): string {
-  const key = Buffer.concat([md5(user), Buffer.from(RESPONSE_KEY_SUFFIX, 'utf8')]);
-  const decipher = createDecipheriv('aes-256-cbc', key, Buffer.from(RESPONSE_IV, 'utf8'));
-  return Buffer.concat([decipher.update(Buffer.from(body.trim(), 'base64')), decipher.final()]).toString('utf8');
+/** The gate reads `user` without form-decoding, so `+` and `@` must reach it unescaped. */
+export function loginUserParam(user: string): string {
+  return encodeURIComponent(caesarShift(user)).replace(/%40/g, '@').replace(/%2B/g, '+');
 }
 
 export function isSuccess(envelope: Envelope): boolean {
@@ -68,27 +71,41 @@ export function payload(envelope: Envelope): Envelope {
   return (envelope.datas ?? envelope.data ?? envelope) as Envelope;
 }
 
-export async function request(url: string, apiVersion: string, init: RequestInit = {}): Promise<{ status: number; body: string }> {
+export async function request(url: string, apiVersion: string, init: RequestInit = {}): Promise<{ status: number; envelope: Envelope }> {
   const res = await fetch(url, {
     ...init,
     headers: {
       'api-version': apiVersion,
       'User-Agent': USER_AGENT,
-      'x-cloud-lang': 'en',
+      'x-auth-token': '',
+      'Accept-Language': 'en',
       Accept: '*/*',
       ...init.headers,
     },
     signal: AbortSignal.timeout(15_000),
   });
-  return { status: res.status, body: await res.text() };
+  const body = await res.text();
+  try {
+    return { status: res.status, envelope: JSON.parse(body) as Envelope };
+  } catch {
+    throw new Error(`HTTP ${res.status} non-JSON response (${body.length} bytes) from ${new URL(url).pathname}`);
+  }
 }
 
-export function parseJson(body: string): Envelope | undefined {
-  try {
-    return JSON.parse(body) as Envelope;
-  } catch {
-    return undefined;
-  }
+export async function form(url: string, apiVersion: string, fields: Record<string, string>, headers: Record<string, string> = {}) {
+  return request(url, apiVersion, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded', ...headers },
+    body: new URLSearchParams(fields).toString(),
+  });
+}
+
+export async function json(url: string, apiVersion: string, body: unknown, headers: Record<string, string> = {}) {
+  return request(url, apiVersion, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...headers },
+    body: JSON.stringify(body),
+  });
 }
 
 /** Shape of a value with every string replaced by its length, so secrets never reach a log. */
