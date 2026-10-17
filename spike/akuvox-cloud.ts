@@ -88,7 +88,7 @@ export async function request(url: string, apiVersion: string, init: RequestInit
   try {
     return { status: res.status, envelope: JSON.parse(body) as Envelope };
   } catch {
-    throw new Error(`HTTP ${res.status} non-JSON response (${body.length} bytes) from ${new URL(url).pathname}`);
+    throw new Error(`HTTP ${res.status} non-JSON response from ${new URL(url).pathname}: ${body.length <= 120 ? JSON.stringify(body) : `${body.length} bytes`}`);
   }
 }
 
@@ -120,4 +120,41 @@ export function shape(value: unknown): unknown {
 
 export function hostOf(server: unknown): string | undefined {
   return typeof server === 'string' && server ? server.split(':')[0] : undefined;
+}
+
+/** `/refresh_token` refuses HTTP/1.1, which is all `fetch` speaks here. */
+export async function http2Json(url: string, apiVersion: string, body: unknown, headers: Record<string, string> = {}): Promise<{ status: number; envelope: Envelope }> {
+  const { connect } = await import('node:http2');
+  const target = new URL(url);
+  const client = connect(target.origin);
+  try {
+    return await new Promise((resolve, reject) => {
+      const req = client.request({
+        ':method': 'POST',
+        ':path': target.pathname + target.search,
+        'api-version': apiVersion,
+        'user-agent': USER_AGENT,
+        'content-type': 'application/json',
+        accept: '*/*',
+        ...headers,
+      });
+      let status = 0;
+      let text = '';
+      req.setEncoding('utf8');
+      req.setTimeout(15_000, () => req.close());
+      req.on('response', (h) => (status = Number(h[':status'])));
+      req.on('data', (chunk: string) => (text += chunk));
+      req.on('error', reject);
+      req.on('end', () => {
+        try {
+          resolve({ status, envelope: JSON.parse(text) as Envelope });
+        } catch {
+          reject(new Error(`HTTP/2 ${status} non-JSON response from ${target.pathname}: ${text.length <= 120 ? JSON.stringify(text) : `${text.length} bytes`}`));
+        }
+      });
+      req.end(JSON.stringify(body));
+    });
+  } finally {
+    client.close();
+  }
 }

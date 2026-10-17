@@ -30,6 +30,15 @@ POST gate/enduser/enduser_verify_code   api-version 7.33, JSON {verify_code, use
        rest_server_https, web_backend_server, rtmp_server, vrtsp_server, vrtsps_server
 ```
 
+## Staying logged in
+
+| Path | Request | Result |
+|---|---|---|
+| Refresh | `POST gate/refresh_token` api-version **6.8**, JSON `{refresh_token}`, `x-auth-token: <token>` | new `token` + `refresh_token`; the old token stops working at once |
+| Re-login | `GET gate/login?…&id_code=<two_factor_auth_idcode>` | full token without the email code |
+
+Other api-versions get the plain-text reply `http req version is out of request`.
+
 ## Session calls (token in `?token=` and `x-auth-token`)
 
 | Call | Request | Notes |
