@@ -20,6 +20,13 @@ export class CameraDoorbellAccessory {
       .setCharacteristic(Characteristic.Model, 'SmartPlus Intercom')
       .setCharacteristic(Characteristic.SerialNumber, device.mac);
 
+    // Shed lock/contact services left on this accessory by the earlier combined design.
+    for (const stale of [...accessory.services]) {
+      if (stale.UUID === Service.LockMechanism.UUID || stale.UUID === Service.ContactSensor.UUID) {
+        accessory.removeService(stale);
+      }
+    }
+
     this.doorbell = accessory.getService(Service.Doorbell) ?? accessory.addService(Service.Doorbell, device.location);
     accessory.category = this.platform.hap.Categories.VIDEO_DOORBELL;
 
