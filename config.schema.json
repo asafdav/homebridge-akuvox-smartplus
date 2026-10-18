@@ -1,0 +1,43 @@
+{
+  "pluginAlias": "AkuvoxSmartPlus",
+  "pluginType": "platform",
+  "singular": true,
+  "headerDisplay": "Connects an Akuvox SmartPlus intercom to HomeKit. Use a dedicated family-member account, not your personal login.",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "name": {
+        "title": "Name",
+        "type": "string",
+        "default": "Akuvox SmartPlus",
+        "required": true
+      },
+      "region": {
+        "title": "Region",
+        "type": "string",
+        "default": "ecloud",
+        "oneOf": [
+          { "title": "Europe / Middle East (ecloud)", "enum": ["ecloud"] },
+          { "title": "North & Latin America (ucloud)", "enum": ["ucloud"] },
+          { "title": "Asia-Pacific (scloud)", "enum": ["scloud"] },
+          { "title": "Japan / Korea (jcloud)", "enum": ["jcloud"] },
+          { "title": "China (ccloud)", "enum": ["ccloud"] },
+          { "title": "Russia (rucloud)", "enum": ["rucloud"] }
+        ],
+        "required": true
+      },
+      "email": {
+        "title": "SmartPlus account email",
+        "type": "string",
+        "format": "email",
+        "required": true
+      },
+      "password": {
+        "title": "SmartPlus account password",
+        "type": "string",
+        "required": true,
+        "x-schema-form": { "type": "password" }
+      }
+    }
+  }
+}

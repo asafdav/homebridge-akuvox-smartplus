@@ -1,7 +1,38 @@
 {
   "name": "homebridge-akuvox-smartplus",
-  "version": "0.0.0",
-  "private": true,
+  "displayName": "Akuvox SmartPlus",
+  "version": "0.1.0",
+  "description": "Homebridge plugin for Akuvox SmartPlus intercoms: unlock, doorbell and camera through the Akuvox cloud.",
   "type": "module",
-  "engines": { "node": ">=24" }
+  "main": "dist/index.js",
+  "engines": {
+    "node": ">=22",
+    "homebridge": "^2.0.0"
+  },
+  "keywords": [
+    "homebridge-plugin",
+    "akuvox",
+    "smartplus",
+    "intercom",
+    "doorbell"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "tsc --noEmit"
+  },
+  "files": [
+    "dist",
+    "config.schema.json"
+  ],
+  "dependencies": {},
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "homebridge": "^2.0.0",
+    "typescript": "^5.9.0",
+    "vitest": "^3.0.0"
+  },
+  "license": "MIT"
 }
