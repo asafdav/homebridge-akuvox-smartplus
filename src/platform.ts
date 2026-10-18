@@ -1,5 +1,7 @@
 import type { API, DynamicPlatformPlugin, Logging, PlatformAccessory, PlatformConfig } from 'homebridge';
 import { AkuvoxCloud } from './akuvox/cloud.js';
+import { NotPairedError, SessionManager } from './akuvox/session-manager.js';
+import { SessionStore } from './akuvox/session-store.js';
 import type { Region } from './settings.js';
 import { REGIONS } from './settings.js';
 
@@ -38,15 +40,22 @@ export class AkuvoxSmartPlusPlatform implements DynamicPlatformPlugin {
     }
 
     const cloud = new AkuvoxCloud(region, this.config.email, this.config.password);
+    const manager = new SessionManager(cloud, new SessionStore(this.api.user.storagePath()), this.log);
+    if (!manager.isPaired) {
+      this.log.warn('Not paired yet. Run `akuvox-pair` once over SSH to complete the emailed-code sign-in, then restart Homebridge.');
+      return;
+    }
+
     try {
-      const challenge = await cloud.login();
-      if (challenge.needsTwoFactor) {
-        this.log.warn('This account requires a verification code on first sign-in. Run the pairing step (coming in the next build) to complete setup.');
+      const devices = await manager.listDevices();
+      const doors = devices.filter((d) => d.relays.length > 0);
+      this.log.info(`Akuvox session active. ${doors.length} door unit(s): ${doors.map((d) => d.location).join(', ')}. Accessories are wired in the next build.`);
+    } catch (error) {
+      if (error instanceof NotPairedError) {
+        this.log.warn(`${error.message}`);
         return;
       }
-      this.log.info('Signed in to Akuvox SmartPlus; device discovery is wired in the next build.');
-    } catch (error) {
-      this.log.error(`Akuvox sign-in failed: ${(error as Error).message}`);
+      this.log.error(`Akuvox discovery failed: ${(error as Error).message}`);
     }
   }
 }

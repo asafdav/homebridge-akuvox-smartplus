@@ -13,6 +13,8 @@ export interface LoginChallenge {
   tempToken?: string;
   restServer: string;
   webBackendServer?: string;
+  /** Present when the account skipped two-factor and the token came back directly. */
+  result?: LoginResult;
   raw: Envelope;
 }
 
@@ -30,6 +32,20 @@ export interface LoginResult {
 
 const isSuccess = (e: Envelope): boolean => e.result === 0 || e.err_code === '0' || e.code === 0;
 const payload = (e: Envelope): Envelope => (e.datas ?? e.data ?? e) as Envelope;
+
+export function parseLoginResult(d: Envelope): LoginResult {
+  return {
+    token: d.token as string,
+    refreshToken: d.refresh_token as string,
+    tokenValidSeconds: Number(d.token_valid ?? 0),
+    idCode: d.two_factor_auth_idcode as string | undefined,
+    restServer: d.rest_server_https as string,
+    webBackendServer: d.web_backend_server as string | undefined,
+    rtspRelay: (d.rtmp_server as string | undefined)?.split(':')[0],
+    vrtspServer: d.vrtsp_server as string | undefined,
+    raw: d,
+  };
+}
 
 export class AkuvoxCloud {
   private readonly gate: string;
@@ -53,6 +69,7 @@ export class AkuvoxCloud {
       tempToken: d.two_factor_auth_temp_token as string | undefined,
       restServer: d.rest_server_https as string,
       webBackendServer: d.web_backend_server as string | undefined,
+      result: d.token ? parseLoginResult(d) : undefined,
       raw: d,
     };
   }
@@ -72,14 +89,14 @@ export class AkuvoxCloud {
   async verifyTwoFactorCode(code: string): Promise<LoginResult> {
     const e = await this.post(`${this.gate}/enduser/enduser_verify_code`, '7.33', JSON.stringify({ verify_code: code, user: this.user }), 'application/json');
     this.assert(e, 'verify code');
-    return this.toLoginResult(payload(e));
+    return parseLoginResult(payload(e));
   }
 
   /** Renew the token without re-login; the previous token is invalidated. */
   async refresh(refreshToken: string, token: string): Promise<LoginResult> {
     const e = await this.postHttp2(`${this.gate}/refresh_token`, '6.8', { refresh_token: refreshToken }, token);
     this.assert(e, 'refresh token');
-    return this.toLoginResult(payload(e));
+    return parseLoginResult(payload(e));
   }
 
   /** Re-login on a trusted device, skipping the emailed code. */
@@ -88,7 +105,7 @@ export class AkuvoxCloud {
     this.assert(e, 're-login');
     const d = payload(e);
     if (!d.token) throw new AkuvoxError('re-login did not return a token; an emailed code is required');
-    return this.toLoginResult(d);
+    return parseLoginResult(d);
   }
 
   async listDevices(restServer: string, token: string): Promise<AkuvoxDevice[]> {
@@ -149,20 +166,6 @@ export class AkuvoxCloud {
       initiator: r.initiator as string,
       picUrl: r.picUrl as string | undefined,
     }));
-  }
-
-  private toLoginResult(d: Envelope): LoginResult {
-    return {
-      token: d.token as string,
-      refreshToken: d.refresh_token as string,
-      tokenValidSeconds: Number(d.token_valid ?? 0),
-      idCode: d.two_factor_auth_idcode as string | undefined,
-      restServer: d.rest_server_https as string,
-      webBackendServer: d.web_backend_server as string | undefined,
-      rtspRelay: (d.rtmp_server as string | undefined)?.split(':')[0],
-      vrtspServer: d.vrtsp_server as string | undefined,
-      raw: d,
-    };
   }
 
   private assert(e: Envelope, what: string): void {
