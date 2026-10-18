@@ -31,7 +31,7 @@ export class AkuvoxSmartPlusPlatform implements DynamicPlatformPlugin {
   constructor(
     readonly log: Logging,
     private readonly config: AkuvoxConfig,
-    private readonly api: API,
+    readonly api: API,
   ) {
     this.hap = api.hap;
     this.unlockSeconds = Math.max(1, this.config.unlockSeconds ?? 5);

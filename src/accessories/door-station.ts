@@ -1,5 +1,7 @@
 import type { CharacteristicValue, PlatformAccessory, Service } from 'homebridge';
 import type { AkuvoxDevice } from '../akuvox/types.js';
+import { buildRtspUrl } from '../camera/rtsp.js';
+import { AkuvoxStreamingDelegate } from '../camera/streaming-delegate.js';
 import type { AkuvoxSmartPlusPlatform } from '../platform.js';
 import { makeLockTargetHandler } from './lock-controller.js';
 
@@ -32,6 +34,19 @@ export class DoorStationAccessory {
     this.doorbell = accessory.getService(Service.Doorbell) ?? accessory.addService(Service.Doorbell, device.location);
     this.contact = accessory.getService(Service.ContactSensor) ?? accessory.addService(Service.ContactSensor, `${device.location} opened`);
     this.contact.updateCharacteristic(Characteristic.ContactSensorState, Characteristic.ContactSensorState.CONTACT_DETECTED);
+
+    if (device.rtspPassword && device.cameraCount > 0) {
+      this.setupCamera(device);
+    }
+  }
+
+  private setupCamera(device: AkuvoxDevice): void {
+    const delegate = new AkuvoxStreamingDelegate(this.platform.api, this.platform.log, () => {
+      const info = this.platform.session.getRtspInfo();
+      return buildRtspUrl({ vrtspServer: info.vrtspServer, relayHost: info.relayHost, mac: device.mac, password: device.rtspPassword! });
+    });
+    this.accessory.configureController(delegate.attachController());
+    this.accessory.category = this.platform.hap.Categories.VIDEO_DOORBELL;
   }
 
   private wireLock(service: Service, mac: string, relayId: string): void {

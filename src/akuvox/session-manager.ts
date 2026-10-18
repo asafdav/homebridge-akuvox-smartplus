@@ -26,6 +26,10 @@ export class SessionManager {
     return this.session !== undefined;
   }
 
+  getRtspInfo(): { vrtspServer?: string; relayHost?: string } {
+    return { vrtspServer: this.session?.vrtspServer, relayHost: this.session?.rtspRelay };
+  }
+
   getSipCredentials(): { host: string; port: number; user: string; password: string } | undefined {
     const s = this.session;
     if (!s?.sipUser || !s.sipPassword || !s.sipServer) return undefined;
