@@ -1,5 +1,7 @@
 import type { API, DynamicPlatformPlugin, HAP, Logging, PlatformAccessory, PlatformConfig } from 'homebridge';
-import { DoorStationAccessory } from './accessories/door-station.js';
+import { CameraDoorbellAccessory } from './accessories/camera-doorbell.js';
+import { ContactAccessory } from './accessories/contact.js';
+import { LockAccessory } from './accessories/lock.js';
 import { AkuvoxCloud } from './akuvox/cloud.js';
 import { DoorLogPoller } from './akuvox/door-log-poller.js';
 import { NotPairedError, SessionManager } from './akuvox/session-manager.js';
@@ -23,7 +25,8 @@ export class AkuvoxSmartPlusPlatform implements DynamicPlatformPlugin {
   session!: SessionManager;
 
   private readonly cached = new Map<string, PlatformAccessory>();
-  private readonly stations = new Map<string, DoorStationAccessory>();
+  private readonly doorbells = new Map<string, CameraDoorbellAccessory>();
+  private readonly contacts = new Map<string, ContactAccessory>();
   private readonly sipToMac = new Map<string, string>();
   private sip?: SipListener;
   private poller?: DoorLogPoller;
@@ -70,7 +73,25 @@ export class AkuvoxSmartPlusPlatform implements DynamicPlatformPlugin {
     const doorStations = devices.filter((d) => d.relays.some((r) => r.enabled));
     const wanted = new Set<string>();
     for (const device of doorStations) {
-      wanted.add(this.registerStation(device));
+      const relays = device.relays.filter((r) => r.enabled);
+
+      wanted.add(this.ensureAccessory(`akuvox:${device.mac}`, device.location, this.hap.Categories.VIDEO_DOORBELL, (a) => {
+        this.doorbells.set(device.mac, new CameraDoorbellAccessory(this, a, device));
+      }));
+
+      for (const relay of relays) {
+        const lockName = relays.length > 1 ? `${device.location} ${relay.doorName}` : `${device.location} Lock`;
+        wanted.add(this.ensureAccessory(`akuvox:${device.mac}:${relay.relayId}:lock`, lockName, this.hap.Categories.DOOR_LOCK, (a) => {
+          new LockAccessory(this, a, device, relay, lockName);
+        }));
+      }
+
+      const contactName = `${device.location} Opened`;
+      wanted.add(this.ensureAccessory(`akuvox:${device.mac}:contact`, contactName, this.hap.Categories.SENSOR, (a) => {
+        this.contacts.set(device.mac, new ContactAccessory(this, a, device, contactName));
+      }));
+
+      if (device.sip) this.sipToMac.set(device.sip, device.mac);
     }
     this.pruneExcept(wanted);
 
@@ -78,20 +99,21 @@ export class AkuvoxSmartPlusPlatform implements DynamicPlatformPlugin {
     this.startDoorLog();
   }
 
-  private registerStation(device: AkuvoxDevice): string {
-    const uuid = this.hap.uuid.generate(`akuvox:${device.mac}`);
-    let accessory = this.cached.get(uuid);
-    if (accessory) {
-      accessory.displayName = device.location;
-      this.api.updatePlatformAccessories([accessory]);
-    } else {
-      accessory = new this.api.platformAccessory(device.location, uuid);
-      this.api.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory]);
-      this.cached.set(uuid, accessory);
-      this.log.info(`Added door station "${device.location}"`);
+  private ensureAccessory(key: string, name: string, category: number, build: (a: PlatformAccessory) => void): string {
+    const uuid = this.hap.uuid.generate(key);
+    const existing = this.cached.get(uuid);
+    if (existing) {
+      existing.displayName = name;
+      build(existing);
+      this.api.updatePlatformAccessories([existing]);
+      return uuid;
     }
-    this.stations.set(device.mac, new DoorStationAccessory(this, accessory, device));
-    if (device.sip) this.sipToMac.set(device.sip, device.mac);
+    const accessory = new this.api.platformAccessory(name, uuid);
+    accessory.category = category;
+    build(accessory);
+    this.api.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory]);
+    this.cached.set(uuid, accessory);
+    this.log.info(`Added "${name}"`);
     return uuid;
   }
 
@@ -113,8 +135,8 @@ export class AkuvoxSmartPlusPlatform implements DynamicPlatformPlugin {
     this.sip = new SipListener(creds, this.log);
     this.sip.on('ring', (event: RingEvent) => {
       const mac = this.sipToMac.get(event.callerSip);
-      const station = (mac && this.stations.get(mac)) || this.onlyStation();
-      station?.ring();
+      const doorbell = (mac && this.doorbells.get(mac)) || this.only(this.doorbells);
+      doorbell?.ring();
     });
     this.sip.start();
   }
@@ -123,12 +145,12 @@ export class AkuvoxSmartPlusPlatform implements DynamicPlatformPlugin {
     this.poller = new DoorLogPoller(this.session, this.log);
     this.poller.on('opened', () => {
       // One door station in practice; route to it. Multi-station routing needs the entry's MAC.
-      this.onlyStation()?.opened();
+      this.only(this.contacts)?.opened();
     });
     this.poller.start();
   }
 
-  private onlyStation(): DoorStationAccessory | undefined {
-    return this.stations.size === 1 ? [...this.stations.values()][0] : undefined;
+  private only<T>(map: Map<string, T>): T | undefined {
+    return map.size === 1 ? [...map.values()][0] : undefined;
   }
 }
