@@ -26,6 +26,13 @@ export class SessionManager {
     return this.session !== undefined;
   }
 
+  getSipCredentials(): { host: string; port: number; user: string; password: string } | undefined {
+    const s = this.session;
+    if (!s?.sipUser || !s.sipPassword || !s.sipServer) return undefined;
+    const [host, port] = s.sipServer.split(':');
+    return { host: host!, port: Number(port ?? 5060), user: s.sipUser, password: s.sipPassword };
+  }
+
   /** Persist the result of a fresh login or pairing as the active session. */
   adopt(result: LoginResult, sip?: { sipUser: string; sipPassword: string }, sipServer?: string): AkuvoxSession {
     const session: AkuvoxSession = {
