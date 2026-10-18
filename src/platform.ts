@@ -52,12 +52,7 @@ export class AkuvoxSmartPlusPlatform implements DynamicPlatformPlugin {
       this.log.error(`Unknown region "${region}". Expected one of: ${REGIONS.join(', ')}`);
       return;
     }
-    if (!this.config.email || !this.config.password) {
-      this.log.error('Missing "email" or "password" in the platform config; cannot sign in.');
-      return;
-    }
-
-    const cloud = new AkuvoxCloud(region, this.config.email, this.config.password);
+    const cloud = new AkuvoxCloud(region, this.config.email ?? '', this.config.password ?? '');
     this.session = new SessionManager(cloud, new SessionStore(this.api.user.storagePath()), this.log);
     if (!this.session.isPaired) {
       this.log.warn('Not paired yet. Run `akuvox-pair` once over SSH, then restart Homebridge.');

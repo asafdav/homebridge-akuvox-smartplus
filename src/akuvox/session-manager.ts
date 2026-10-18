@@ -71,7 +71,7 @@ export class SessionManager {
     } catch (error) {
       this.log.warn(`Token refresh failed (${(error as Error).message}); trying trusted re-login`);
     }
-    if (s.idCode) {
+    if (s.idCode && this.cloud.hasCredentials) {
       return this.adopt(await this.cloud.reloginWithIdCode(s.idCode));
     }
     throw new NotPairedError('Session expired and cannot be renewed. Run `akuvox-pair` again.');

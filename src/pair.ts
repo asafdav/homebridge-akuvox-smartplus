@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import { AkuvoxCloud } from './akuvox/cloud.js';
@@ -21,18 +22,34 @@ function storagePath(): string {
   return process.env.HOMEBRIDGE_STORAGE_PATH ?? '/var/lib/homebridge';
 }
 
-function loadPlatformConfig(dir: string): Required<Omit<PlatformBlock, 'platform'>> {
-  const config = JSON.parse(readFileSync(join(dir, 'config.json'), 'utf8')) as { platforms?: PlatformBlock[] };
-  const block = (config.platforms ?? []).find((p) => p.platform === PLATFORM_NAME);
-  if (!block) throw new Error(`No "${PLATFORM_NAME}" platform found in ${join(dir, 'config.json')}`);
-  if (!block.email || !block.password) throw new Error('The platform config needs both "email" and "password".');
-  return { region: block.region ?? 'ecloud', email: block.email, password: block.password };
+function readPlatformBlock(dir: string): PlatformBlock {
+  try {
+    const config = JSON.parse(readFileSync(join(dir, 'config.json'), 'utf8')) as { platforms?: PlatformBlock[] };
+    return (config.platforms ?? []).find((p) => p.platform === PLATFORM_NAME) ?? {};
+  } catch {
+    return {};
+  }
+}
+
+/** Credentials never need to live in config.json; a one-time pairing reads them here. */
+function readCredentialsFile(): { email?: string; password?: string } {
+  try {
+    const [email, password] = readFileSync(join(homedir(), '.akuvox', 'credentials'), 'utf8').split('\n');
+    return { email: email?.trim() || undefined, password: password || undefined };
+  } catch {
+    return {};
+  }
 }
 
 const log = { info: (m: string) => console.log(m), warn: (m: string) => console.warn(m), error: (m: string) => console.error(m) };
 
 const dir = storagePath();
-const { region, email, password } = loadPlatformConfig(dir);
+const block = readPlatformBlock(dir);
+const file = readCredentialsFile();
+const rl = createInterface({ input: process.stdin, output: process.stdout });
+const region: Region = block.region ?? 'ecloud';
+const email = block.email ?? file.email ?? (await rl.question('SmartPlus account email: ')).trim();
+const password = block.password ?? file.password ?? (await rl.question('SmartPlus account password: '));
 const cloud = new AkuvoxCloud(region, email, password);
 const manager = new SessionManager(cloud, new SessionStore(dir), log);
 
@@ -43,11 +60,10 @@ let result = challenge.result;
 if (!result) {
   if (!challenge.needsTwoFactor || !challenge.tempToken) throw new Error('Login returned no token and no two-factor challenge.');
   await cloud.sendTwoFactorCode(challenge.restServer, challenge.tempToken);
-  const rl = createInterface({ input: process.stdin, output: process.stdout });
   const code = (await rl.question('Enter the verification code emailed to the account: ')).trim();
-  rl.close();
   result = await cloud.verifyTwoFactorCode(code);
 }
+rl.close();
 
 const sip = await cloud.getSipConfig(result.restServer, result.token);
 const sipServer = await cloud.getSipServer(result.token);

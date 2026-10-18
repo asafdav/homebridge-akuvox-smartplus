@@ -2,7 +2,7 @@
   "pluginAlias": "AkuvoxSmartPlus",
   "pluginType": "platform",
   "singular": true,
-  "headerDisplay": "Connects an Akuvox SmartPlus intercom to HomeKit. Use a dedicated family-member account, not your personal login.",
+  "headerDisplay": "Connects an Akuvox SmartPlus intercom to HomeKit. Use a dedicated family-member account, not your personal login. After saving, run `akuvox-pair` once over SSH to complete the emailed-code sign-in, then restart Homebridge.",
   "schema": {
     "type": "object",
     "properties": {
@@ -27,16 +27,29 @@
         "required": true
       },
       "email": {
-        "title": "SmartPlus account email",
+        "title": "SmartPlus account email (optional)",
+        "description": "Leave blank to keep credentials out of config.json; akuvox-pair will prompt. Setting it enables automatic re-login if the token ever fully expires.",
         "type": "string",
-        "format": "email",
-        "required": true
+        "format": "email"
       },
       "password": {
-        "title": "SmartPlus account password",
+        "title": "SmartPlus account password (optional)",
         "type": "string",
-        "required": true,
         "x-schema-form": { "type": "password" }
+      },
+      "unlockSeconds": {
+        "title": "Relock delay (seconds)",
+        "description": "How long the HomeKit lock shows Unlocked before snapping back to Secured.",
+        "type": "integer",
+        "default": 5,
+        "minimum": 1,
+        "maximum": 60
+      },
+      "doorbell": {
+        "title": "Enable doorbell rings (SIP)",
+        "description": "Register on the intercom PBX to get real-time ring notifications.",
+        "type": "boolean",
+        "default": true
       }
     }
   }

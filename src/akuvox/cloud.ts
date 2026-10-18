@@ -58,6 +58,11 @@ export class AkuvoxCloud {
     this.gate = `https://gate.${region}.akuvox.com:8600`;
   }
 
+  /** Whether login/re-login is possible; refresh works without these. */
+  get hasCredentials(): boolean {
+    return this.user.length > 0 && this.password.length > 0;
+  }
+
   /** Step 1: submit credentials. Returns whether an emailed code is still required. */
   async login(idCode?: string): Promise<LoginChallenge> {
     const idCodeQuery = idCode ? `&id_code=${encodeURIComponent(idCode)}` : '';
