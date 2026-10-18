@@ -6,7 +6,7 @@ describe('doorToHomekitArgs', () => {
     const args = doorToHomekitArgs({ sdpPath: '/t/door.sdp', hkAddress: '10.0.0.5', hkPort: 50000, hkSsrc: 1, payloadType: 110, sampleRate: 24000, packetTime: 20, srtpParams: 'OUT' });
     expect(args).toContain('libopus');
     expect(args).toContain('OUT');
-    expect(args.at(-1)).toBe('srtp://10.0.0.5:50000?rtcpport=50000&pkt_size=188');
+    expect(args.at(-1)).toBe('srtp://10.0.0.5:50000?rtcpport=50000&pkt_size=376');
     expect(args).toContain('/t/door.sdp');
   });
 });

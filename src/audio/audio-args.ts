@@ -23,7 +23,8 @@ export function doorToHomekitArgs(a: DoorToHomekitArgs): string[] {
     '-payload_type', String(a.payloadType), '-ssrc', String(a.hkSsrc),
     '-f', 'rtp',
     '-srtp_out_suite', 'AES_CM_128_HMAC_SHA1_80', '-srtp_out_params', a.srtpParams,
-    `srtp://${a.hkAddress}:${a.hkPort}?rtcpport=${a.hkPort}&pkt_size=188`,
+    // Opus voice frames (~160-300 B) must fit the RTP payload; the video MTU is far too small.
+    `srtp://${a.hkAddress}:${a.hkPort}?rtcpport=${a.hkPort}&pkt_size=376`,
   ];
 }
 
