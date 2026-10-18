@@ -4,8 +4,8 @@ import { buildRtspUrl, redactRtsp } from '../src/camera/rtsp.js';
 
 describe('buildRtspUrl', () => {
   it('prefers vrtsp_server', () => {
-    expect(buildRtspUrl({ vrtspServer: 'rtspsrv1.ecloud.akuvox.com:8601', relayHost: '1.2.3.4', mac: '0C11052A6095', password: 'pw' }))
-      .toBe('rtsp://ak:pw@rtspsrv1.ecloud.akuvox.com:8601/0C11052A6095');
+    expect(buildRtspUrl({ vrtspServer: 'rtspsrv1.ecloud.akuvox.com:8601', relayHost: '1.2.3.4', mac: 'AABBCCDDEEFF', password: 'pw' }))
+      .toBe('rtsp://ak:pw@rtspsrv1.ecloud.akuvox.com:8601/AABBCCDDEEFF');
   });
 
   it('falls back to the relay host on :554', () => {
