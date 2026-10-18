@@ -216,6 +216,11 @@ export class SipListener extends EventEmitter {
     return this.call !== undefined;
   }
 
+  /** The media offer of the pending/active call, for building an SDP answer. */
+  get pendingOffer(): MediaOffer | undefined {
+    return this.call?.offer;
+  }
+
   /** Answer the pending call with an audio-only SDP, returning the door's RTP endpoint. */
   answer(localSdp: string): { address: string; audioPort: number; payloadType: number } | undefined {
     const call = this.call;
