@@ -42,6 +42,7 @@ export class AkuvoxSmartPlusPlatform implements DynamicPlatformPlugin {
     this.api.on('shutdown', () => {
       this.sip?.stop();
       this.poller?.stop();
+      for (const doorbell of this.doorbells.values()) doorbell.delegate?.shutdownStreams();
     });
   }
 

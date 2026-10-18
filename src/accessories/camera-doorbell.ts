@@ -7,6 +7,7 @@ import type { AkuvoxSmartPlusPlatform } from '../platform.js';
 /** Camera + doorbell for a door station, published as a video doorbell. */
 export class CameraDoorbellAccessory {
   private readonly doorbell: Service;
+  delegate?: AkuvoxStreamingDelegate;
 
   constructor(
     private readonly platform: AkuvoxSmartPlusPlatform,
@@ -31,11 +32,11 @@ export class CameraDoorbellAccessory {
     accessory.category = this.platform.hap.Categories.VIDEO_DOORBELL;
 
     if (device.rtspPassword && device.cameraCount > 0) {
-      const delegate = new AkuvoxStreamingDelegate(this.platform.api, this.platform.log, () => {
+      this.delegate = new AkuvoxStreamingDelegate(this.platform.api, this.platform.log, () => {
         const info = this.platform.session.getRtspInfo();
         return buildRtspUrl({ vrtspServer: info.vrtspServer, relayHost: info.relayHost, mac: device.mac, password: device.rtspPassword! });
       });
-      accessory.configureController(delegate.attachController());
+      accessory.configureController(this.delegate.attachController());
     }
   }
 

@@ -178,4 +178,11 @@ export class AkuvoxStreamingDelegate implements CameraStreamingDelegate {
     }
     this.pending.delete(sessionID);
   }
+
+  /** Kill any live ffmpeg so a Homebridge restart leaves no orphaned streams. */
+  shutdownStreams(): void {
+    for (const proc of this.ongoing.values()) proc.kill('SIGKILL');
+    this.ongoing.clear();
+    this.pending.clear();
+  }
 }
