@@ -1,7 +1,7 @@
 {
   "name": "homebridge-akuvox-smartplus",
   "displayName": "Akuvox SmartPlus",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Homebridge plugin for Akuvox SmartPlus intercoms: unlock, doorbell and camera through the Akuvox cloud.",
   "type": "module",
   "main": "dist/index.js",
