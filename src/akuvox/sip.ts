@@ -1,6 +1,7 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { connect, type Socket } from 'node:net';
+import { parseSdpOffer, type MediaOffer } from '../sip/sdp.js';
 
 export interface SipMessage {
   start: string;
@@ -58,7 +59,26 @@ export function buildDigestAuth({ challenge, username, password, method, uri }: 
 
 export interface RingEvent {
   callerSip: string;
+  offer?: MediaOffer;
 }
+
+interface ActiveCall {
+  invite: SipMessage;
+  offer: MediaOffer;
+  callId: string;
+  /** Tag we put in our 200 OK To header; identifies our side of the dialog. */
+  localTag: string;
+  /** The caller's Contact URI — where in-dialog requests (BYE) are sent. */
+  remoteTarget: string;
+  answered: boolean;
+}
+
+/** The host:port the door station should send RTP to, with the chosen G.711 payload type. */
+export interface AnswerParams {
+  localAudioPort: number;
+}
+
+const uriOf = (header: string): string => header.match(/<([^>]+)>/)?.[1] ?? header.replace(/;.*$/, '').trim();
 
 export interface SipLogger {
   info: (m: string) => void;
@@ -73,6 +93,8 @@ export interface SipListenerConfig {
   user: string;
   password: string;
   registerExpires?: number;
+  /** Test seam: supply a socket instead of a real TCP connection. */
+  createSocket?: () => Socket;
 }
 
 /**
@@ -91,6 +113,7 @@ export class SipListener extends EventEmitter {
   private contactHost = '';
   private reconnectDelayMs = 2000;
   private reregisterTimer?: NodeJS.Timeout;
+  private call?: ActiveCall;
 
   private readonly expires: number;
   private readonly uri: string;
@@ -122,7 +145,7 @@ export class SipListener extends EventEmitter {
     this.buffer = '';
     this.callId = randomUUID();
     this.fromTag = randomBytes(6).toString('hex');
-    const socket = connect({ host: this.config.host, port: this.config.port });
+    const socket = this.config.createSocket ? this.config.createSocket() : connect({ host: this.config.host, port: this.config.port });
     this.socket = socket;
     socket.on('connect', () => {
       this.contactHost = `${socket.localAddress}:${socket.localPort}`;
@@ -165,14 +188,82 @@ export class SipListener extends EventEmitter {
     }
     const method = m.start.split(' ')[0];
     if (method === 'INVITE') {
+      const offer = parseSdpOffer(m.body);
+      this.call = { invite: m, offer, callId: sipHeader(m, 'call-id'), localTag: '', remoteTarget: uriOf(sipHeader(m, 'contact')), answered: false };
       this.respond(m, '180 Ringing');
       const callerSip = sipHeader(m, 'from').match(/sip:([^@;>]+)/)?.[1] ?? '';
-      this.emit('ring', { callerSip } satisfies RingEvent);
+      this.emit('ring', { callerSip, offer } satisfies RingEvent);
     } else if (method === 'CANCEL' || method === 'BYE') {
       this.respond(m, '200 OK');
+      if (this.call) {
+        this.call = undefined;
+        this.emit('callEnded');
+      }
+    } else if (method === 'ACK') {
+      // Dialog confirmed; nothing to send.
     } else if (method === 'OPTIONS') {
       this.respond(m, '200 OK');
     }
+  }
+
+  /** The Pi's local address, for building an SDP answer's connection line. */
+  get localAddress(): string {
+    return this.contactHost.split(':')[0] ?? '';
+  }
+
+  /** True while a ring is pending or a call is up. */
+  get hasCall(): boolean {
+    return this.call !== undefined;
+  }
+
+  /** The media offer of the pending/active call, for building an SDP answer. */
+  get pendingOffer(): MediaOffer | undefined {
+    return this.call?.offer;
+  }
+
+  /** Answer the pending call with an audio-only SDP, returning the door's RTP endpoint. */
+  answer(localSdp: string): { address: string; audioPort: number; payloadType: number } | undefined {
+    const call = this.call;
+    if (!call || !this.socket || !call.offer.audio) return undefined;
+    call.localTag = randomBytes(6).toString('hex');
+    call.answered = true;
+    const m = call.invite;
+    const head = [
+      'SIP/2.0 200 OK',
+      ...(m.headers.get('via') ?? []).map((v) => `Via: ${v}`),
+      `From: ${sipHeader(m, 'from')}`,
+      `To: ${sipHeader(m, 'to')};tag=${call.localTag}`,
+      `Call-ID: ${call.callId}`,
+      `CSeq: ${sipHeader(m, 'cseq')}`,
+      `Contact: <sip:${this.config.user}@${this.contactHost};transport=tcp>`,
+      'User-Agent: homebridge-akuvox-smartplus/0',
+      'Content-Type: application/sdp',
+      `Content-Length: ${Buffer.byteLength(localSdp)}`,
+    ].join('\r\n');
+    this.socket.write(head + '\r\n\r\n' + localSdp);
+    const payloadType = call.offer.audio.pcmu ?? call.offer.audio.pcma ?? call.offer.audio.payloadTypes[0] ?? 0;
+    return { address: call.offer.address, audioPort: call.offer.audio.port, payloadType };
+  }
+
+  /** End the active call (we hang up) with an in-dialog BYE. */
+  hangup(): void {
+    const call = this.call;
+    this.call = undefined;
+    if (!call || !call.answered || !this.socket) return;
+    this.cseq += 1;
+    const m = call.invite;
+    const bye = [
+      `BYE ${call.remoteTarget} SIP/2.0`,
+      `Via: SIP/2.0/TCP ${this.contactHost};branch=z9hG4bK${randomBytes(6).toString('hex')};rport`,
+      'Max-Forwards: 70',
+      `From: <${uriOf(sipHeader(m, 'to'))}>;tag=${call.localTag}`,
+      `To: ${sipHeader(m, 'from')}`,
+      `Call-ID: ${call.callId}`,
+      `CSeq: ${this.cseq} BYE`,
+      'Content-Length: 0',
+      '', '',
+    ].join('\r\n');
+    this.socket.write(bye);
   }
 
   private handleResponse(m: SipMessage): void {

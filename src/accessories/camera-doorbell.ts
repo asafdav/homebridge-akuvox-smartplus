@@ -35,7 +35,7 @@ export class CameraDoorbellAccessory {
       this.delegate = new AkuvoxStreamingDelegate(this.platform.api, this.platform.log, () => {
         const info = this.platform.session.getRtspInfo();
         return buildRtspUrl({ vrtspServer: info.vrtspServer, relayHost: info.relayHost, mac: device.mac, password: device.rtspPassword! });
-      });
+      }, this.platform.callController);
       accessory.configureController(this.delegate.attachController());
     }
   }

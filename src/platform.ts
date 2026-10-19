@@ -8,6 +8,8 @@ import { NotPairedError, SessionManager } from './akuvox/session-manager.js';
 import { SessionStore } from './akuvox/session-store.js';
 import { SipListener, type RingEvent } from './akuvox/sip.js';
 import type { AkuvoxDevice } from './akuvox/types.js';
+import type { CallController } from './camera/streaming-delegate.js';
+import { buildAudioAnswer } from './sip/sdp.js';
 import type { Region } from './settings.js';
 import { PLATFORM_NAME, PLUGIN_NAME, REGIONS } from './settings.js';
 
@@ -22,6 +24,7 @@ export interface AkuvoxConfig extends PlatformConfig {
 export class AkuvoxSmartPlusPlatform implements DynamicPlatformPlugin {
   readonly hap: HAP;
   readonly unlockSeconds: number;
+  readonly callController: CallController;
   session!: SessionManager;
 
   private readonly cached = new Map<string, PlatformAccessory>();
@@ -38,6 +41,15 @@ export class AkuvoxSmartPlusPlatform implements DynamicPlatformPlugin {
   ) {
     this.hap = api.hap;
     this.unlockSeconds = Math.max(1, this.config.unlockSeconds ?? 5);
+    const self = this;
+    this.callController = {
+      get localAddress() {
+        return self.sip?.localAddress ?? '';
+      },
+      hasPendingCall: () => !!this.sip?.hasCall,
+      answer: (localAudioPort) => this.answerDoorCall(localAudioPort),
+      hangup: () => this.sip?.hangup(),
+    };
     this.api.on('didFinishLaunching', () => void this.discover());
     this.api.on('shutdown', () => {
       this.sip?.stop();
@@ -153,5 +165,21 @@ export class AkuvoxSmartPlusPlatform implements DynamicPlatformPlugin {
 
   private only<T>(map: Map<string, T>): T | undefined {
     return map.size === 1 ? [...map.values()][0] : undefined;
+  }
+
+  private answerDoorCall(localAudioPort: number): { address: string; audioPort: number; payloadType: number } | undefined {
+    const offer = this.sip?.pendingOffer;
+    if (!offer?.audio || !this.sip) return undefined;
+    const payloadName = offer.audio.pcmu !== undefined ? 'PCMU' : 'PCMA';
+    const payloadType = offer.audio.pcmu ?? offer.audio.pcma ?? 0;
+    const sdp = buildAudioAnswer({
+      localAddress: this.sip.localAddress,
+      localAudioPort,
+      payloadType,
+      payloadName,
+      telephoneEvent: offer.audio.telephoneEvent,
+      offeredVideoPort: offer.videoPort,
+    });
+    return this.sip.answer(sdp);
   }
 }
