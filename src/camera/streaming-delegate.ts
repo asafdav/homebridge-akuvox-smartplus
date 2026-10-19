@@ -35,6 +35,7 @@ interface SessionInfo {
 }
 
 const SNAPSHOT_TIMEOUT_MS = 10_000;
+const SNAPSHOT_CACHE_MS = 10_000;
 const SAMPLERATE_HZ = [8000, 16000, 24000];
 const DOOR_LOCAL_AUDIO_PORT = 41000;
 
@@ -43,6 +44,7 @@ export class AkuvoxStreamingDelegate implements CameraStreamingDelegate {
   private readonly pending = new Map<string, SessionInfo>();
   private readonly ongoing = new Map<string, ChildProcess>();
   private readonly bridges = new Map<string, AudioBridge>();
+  private cachedSnapshot?: { buf: Buffer; at: number };
 
   constructor(
     private readonly api: API,
@@ -82,32 +84,53 @@ export class AkuvoxStreamingDelegate implements CameraStreamingDelegate {
   }
 
   handleSnapshotRequest(request: SnapshotRequest, callback: SnapshotRequestCallback): void {
-    const url = this.getRtspUrl();
-    if (!url) {
-      callback(new Error('camera stream URL unavailable'));
+    const cached = this.cachedSnapshot;
+    if (cached && Date.now() - cached.at < SNAPSHOT_CACHE_MS) {
+      callback(undefined, cached.buf);
       return;
     }
-    const proc = spawn('ffmpeg', snapshotArgs(url, request.width, request.height), { env: process.env });
-    const chunks: Buffer[] = [];
-    let settled = false;
-    const finish = (error?: Error) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      if (error) {
+    this.fetchSnapshot(request.width, request.height)
+      .then((buf) => callback(undefined, buf))
+      .catch((error: Error) => {
         this.log.error(`Snapshot failed: ${error.message}`);
         callback(error);
-      } else {
-        callback(undefined, Buffer.concat(chunks));
-      }
-    };
-    const timer = setTimeout(() => {
-      proc.kill('SIGKILL');
-      finish(new Error('snapshot timed out'));
-    }, SNAPSHOT_TIMEOUT_MS);
-    proc.stdout.on('data', (d: Buffer) => chunks.push(d));
-    proc.on('error', (e) => finish(e));
-    proc.on('close', (code) => finish(code === 0 && chunks.length > 0 ? undefined : new Error(`ffmpeg exited ${code}`)));
+      });
+  }
+
+  /** Grab a frame now and cache it, so a doorbell notification's snapshot is ready instantly. */
+  async warmSnapshot(): Promise<void> {
+    const started = Date.now();
+    try {
+      const buf = await this.fetchSnapshot(640, 480);
+      this.cachedSnapshot = { buf, at: Date.now() };
+      this.log.info(`Snapshot pre-cached in ${Date.now() - started}ms`);
+    } catch (error) {
+      this.log.warn(`Snapshot pre-cache failed: ${(error as Error).message}`);
+    }
+  }
+
+  private fetchSnapshot(width: number, height: number): Promise<Buffer> {
+    const url = this.getRtspUrl();
+    if (!url) return Promise.reject(new Error('camera stream URL unavailable'));
+    return new Promise<Buffer>((resolve, reject) => {
+      const proc = spawn('ffmpeg', snapshotArgs(url, width, height), { env: process.env });
+      const chunks: Buffer[] = [];
+      let settled = false;
+      const finish = (error?: Error, buf?: Buffer) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        if (error) reject(error);
+        else resolve(buf!);
+      };
+      const timer = setTimeout(() => {
+        proc.kill('SIGKILL');
+        finish(new Error('snapshot timed out'));
+      }, SNAPSHOT_TIMEOUT_MS);
+      proc.stdout.on('data', (d: Buffer) => chunks.push(d));
+      proc.on('error', (e) => finish(e));
+      proc.on('close', (code) => finish(code === 0 && chunks.length > 0 ? undefined : new Error(`ffmpeg exited ${code}`), Buffer.concat(chunks)));
+    });
   }
 
   prepareStream(request: PrepareStreamRequest, callback: PrepareStreamCallback): void {

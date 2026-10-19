@@ -42,6 +42,8 @@ export class CameraDoorbellAccessory {
 
   ring(): void {
     const { Characteristic } = this.platform.hap;
+    // Grab a frame now so HomeKit's notification snapshot is ready without a fresh RTSP fetch.
+    void this.delegate?.warmSnapshot();
     this.doorbell.updateCharacteristic(Characteristic.ProgrammableSwitchEvent, Characteristic.ProgrammableSwitchEvent.SINGLE_PRESS);
     this.platform.log.info(`Doorbell ring at ${this.accessory.displayName}`);
   }
