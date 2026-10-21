@@ -45,6 +45,7 @@ export class AkuvoxStreamingDelegate implements CameraStreamingDelegate {
   private readonly ongoing = new Map<string, ChildProcess>();
   private readonly bridges = new Map<string, AudioBridge>();
   private cachedSnapshot?: { buf: Buffer; at: number };
+  private lastRingAt = 0;
 
   constructor(
     private readonly api: API,
@@ -83,10 +84,21 @@ export class AkuvoxStreamingDelegate implements CameraStreamingDelegate {
     return this.controller;
   }
 
+  /** Record the ring instant so HomeKit interactions can be timed against it. */
+  markRing(): void {
+    this.lastRingAt = Date.now();
+  }
+
+  private sinceRing(): string {
+    return this.lastRingAt ? `+${Date.now() - this.lastRingAt}ms after ring` : 'no recent ring';
+  }
+
   handleSnapshotRequest(request: SnapshotRequest, callback: SnapshotRequestCallback): void {
     const cached = this.cachedSnapshot;
-    if (cached && Date.now() - cached.at < SNAPSHOT_CACHE_MS) {
-      callback(undefined, cached.buf);
+    const hit = !!cached && Date.now() - cached.at < SNAPSHOT_CACHE_MS;
+    this.log.info(`HomeKit requested snapshot ${this.sinceRing()} (cache ${hit ? 'hit' : 'miss'})`);
+    if (hit) {
+      callback(undefined, cached!.buf);
       return;
     }
     this.fetchSnapshot(request.width, request.height)
@@ -134,6 +146,7 @@ export class AkuvoxStreamingDelegate implements CameraStreamingDelegate {
   }
 
   prepareStream(request: PrepareStreamRequest, callback: PrepareStreamCallback): void {
+    this.log.info(`HomeKit requested stream prepare ${this.sinceRing()}`);
     const videoSSRC = this.api.hap.CameraController.generateSynchronisationSource();
     const audioSSRC = this.api.hap.CameraController.generateSynchronisationSource();
     const info: SessionInfo = {
