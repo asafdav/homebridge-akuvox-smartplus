@@ -35,7 +35,12 @@ interface SessionInfo {
 }
 
 const SNAPSHOT_TIMEOUT_MS = 10_000;
-const SNAPSHOT_CACHE_MS = 10_000;
+const SNAPSHOT_REFRESH_MS = 5_000;
+// 1x1 JPEG, returned only before the first real frame exists, so a notification never waits on a fetch.
+const PLACEHOLDER_JPEG = Buffer.from(
+  '/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////2wBDAf//////////////////////////////////////////////////////////////////////////////////////wAARCAABAAEDASIAAhEBAxEB/8QAFAABAAAAAAAAAAAAAAAAAAAAAP/EABQQAQAAAAAAAAAAAAAAAAAAAAD/xAAUAQEAAAAAAAAAAAAAAAAAAAAA/8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAwDAQACEQMRAD8AvwA//9k=',
+  'base64',
+);
 const SAMPLERATE_HZ = [8000, 16000, 24000];
 const DOOR_LOCAL_AUDIO_PORT = 41000;
 
@@ -46,6 +51,7 @@ export class AkuvoxStreamingDelegate implements CameraStreamingDelegate {
   private readonly bridges = new Map<string, AudioBridge>();
   private cachedSnapshot?: { buf: Buffer; at: number };
   private lastRingAt = 0;
+  private fetchingSnapshot = false;
 
   constructor(
     private readonly api: API,
@@ -93,31 +99,30 @@ export class AkuvoxStreamingDelegate implements CameraStreamingDelegate {
     return this.lastRingAt ? `+${Date.now() - this.lastRingAt}ms after ring` : 'no recent ring';
   }
 
-  handleSnapshotRequest(request: SnapshotRequest, callback: SnapshotRequestCallback): void {
+  handleSnapshotRequest(_request: SnapshotRequest, callback: SnapshotRequestCallback): void {
+    // Never block: answer immediately with the latest frame (or a placeholder), so the doorbell
+    // push goes out without waiting on a fetch. Refresh in the background for next time.
     const cached = this.cachedSnapshot;
-    const hit = !!cached && Date.now() - cached.at < SNAPSHOT_CACHE_MS;
-    this.log.info(`HomeKit requested snapshot ${this.sinceRing()} (cache ${hit ? 'hit' : 'miss'})`);
-    if (hit) {
-      callback(undefined, cached!.buf);
-      return;
-    }
-    this.fetchSnapshot(request.width, request.height)
-      .then((buf) => callback(undefined, buf))
-      .catch((error: Error) => {
-        this.log.error(`Snapshot failed: ${error.message}`);
-        callback(error);
-      });
+    callback(undefined, cached ? cached.buf : PLACEHOLDER_JPEG);
+    void this.refreshSnapshot();
   }
 
-  /** Grab a frame now and cache it, so a doorbell notification's snapshot is ready instantly. */
+  /** Grab a fresh frame into the cache, unless one is already in flight or the cache is still fresh. */
   async warmSnapshot(): Promise<void> {
-    const started = Date.now();
+    await this.refreshSnapshot(true);
+  }
+
+  private async refreshSnapshot(force = false): Promise<void> {
+    if (this.fetchingSnapshot) return;
+    if (!force && this.cachedSnapshot && Date.now() - this.cachedSnapshot.at < SNAPSHOT_REFRESH_MS) return;
+    this.fetchingSnapshot = true;
     try {
       const buf = await this.fetchSnapshot(640, 480);
       this.cachedSnapshot = { buf, at: Date.now() };
-      this.log.info(`Snapshot pre-cached in ${Date.now() - started}ms`);
     } catch (error) {
-      this.log.warn(`Snapshot pre-cache failed: ${(error as Error).message}`);
+      this.log.warn(`Snapshot refresh failed: ${(error as Error).message}`);
+    } finally {
+      this.fetchingSnapshot = false;
     }
   }
 
