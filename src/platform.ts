@@ -5,13 +5,15 @@ import { LockAccessory } from './accessories/lock.js';
 import { AkuvoxCloud } from './akuvox/cloud.js';
 import { DoorLogPoller } from './akuvox/door-log-poller.js';
 import { NotPairedError, SessionManager } from './akuvox/session-manager.js';
-import { SessionStore } from './akuvox/session-store.js';
+import { CredentialsStore, SessionStore } from './akuvox/session-store.js';
 import { SipListener, type RingEvent } from './akuvox/sip.js';
 import type { AkuvoxDevice } from './akuvox/types.js';
 import type { CallController } from './camera/streaming-delegate.js';
 import { buildAudioAnswer } from './sip/sdp.js';
 import type { Region } from './settings.js';
 import { PLATFORM_NAME, PLUGIN_NAME, REGIONS } from './settings.js';
+
+const REDISCOVER_MS = 5 * 60 * 1000;
 
 export interface AkuvoxConfig extends PlatformConfig {
   region?: Region;
@@ -33,6 +35,8 @@ export class AkuvoxSmartPlusPlatform implements DynamicPlatformPlugin {
   private readonly sipToMac = new Map<string, string>();
   private sip?: SipListener;
   private poller?: DoorLogPoller;
+  private rediscoverTimer?: NodeJS.Timeout;
+  private discovered = false;
 
   constructor(
     readonly log: Logging,
@@ -52,6 +56,7 @@ export class AkuvoxSmartPlusPlatform implements DynamicPlatformPlugin {
     };
     this.api.on('didFinishLaunching', () => void this.discover());
     this.api.on('shutdown', () => {
+      clearTimeout(this.rediscoverTimer);
       this.sip?.stop();
       this.poller?.stop();
       for (const doorbell of this.doorbells.values()) doorbell.delegate?.shutdownStreams();
@@ -68,7 +73,9 @@ export class AkuvoxSmartPlusPlatform implements DynamicPlatformPlugin {
       this.log.error(`Unknown region "${region}". Expected one of: ${REGIONS.join(', ')}`);
       return;
     }
-    const cloud = new AkuvoxCloud(region, this.config.email ?? '', this.config.password ?? '');
+    if (this.discovered) return;
+    const stored = new CredentialsStore(this.api.user.storagePath()).read();
+    const cloud = new AkuvoxCloud(region, this.config.email ?? stored?.email ?? '', this.config.password ?? stored?.password ?? '');
     this.session = new SessionManager(cloud, new SessionStore(this.api.user.storagePath()), this.log);
     if (!this.session.isPaired) {
       this.log.warn('Not paired yet. Run `akuvox-pair` once over SSH, then restart Homebridge.');
@@ -79,9 +86,13 @@ export class AkuvoxSmartPlusPlatform implements DynamicPlatformPlugin {
     try {
       devices = await this.session.listDevices();
     } catch (error) {
-      this.log.error(`Akuvox discovery failed: ${error instanceof NotPairedError ? error.message : (error as Error).message}`);
+      const reason = error instanceof NotPairedError ? error.message : (error as Error).message;
+      this.log.error(`Akuvox discovery failed: ${reason}. Retrying in ${REDISCOVER_MS / 60000} min.`);
+      this.scheduleRediscover();
       return;
     }
+    this.discovered = true;
+    clearTimeout(this.rediscoverTimer);
 
     const doorStations = devices.filter((d) => d.relays.some((r) => r.enabled));
     const wanted = new Set<string>();
@@ -161,6 +172,11 @@ export class AkuvoxSmartPlusPlatform implements DynamicPlatformPlugin {
       this.only(this.contacts)?.opened();
     });
     this.poller.start();
+  }
+
+  private scheduleRediscover(): void {
+    clearTimeout(this.rediscoverTimer);
+    this.rediscoverTimer = setTimeout(() => void this.discover(), REDISCOVER_MS);
   }
 
   private only<T>(map: Map<string, T>): T | undefined {
