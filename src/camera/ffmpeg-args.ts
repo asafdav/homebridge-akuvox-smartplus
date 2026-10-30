@@ -1,6 +1,8 @@
-export function snapshotArgs(rtspUrl: string, width: number, height: number): string[] {
+import type { RtspTransport } from './rtsp.js';
+
+export function snapshotArgs(rtspUrl: string, width: number, height: number, transport: RtspTransport = 'udp'): string[] {
   return [
-    '-rtsp_transport', 'udp',
+    '-rtsp_transport', transport,
     '-i', rtspUrl,
     '-frames:v', '1',
     '-vf', `scale=${width}:${height}:force_original_aspect_ratio=decrease`,
@@ -12,6 +14,7 @@ export function snapshotArgs(rtspUrl: string, width: number, height: number): st
 
 export interface VideoStreamParams {
   rtspUrl: string;
+  transport: RtspTransport;
   width: number;
   height: number;
   fps: number;
@@ -27,7 +30,7 @@ export interface VideoStreamParams {
 /** ffmpeg arguments that transcode the door RTSP to an SRTP H.264 stream HomeKit can play. */
 export function videoStreamArgs(p: VideoStreamParams): string[] {
   return [
-    '-rtsp_transport', 'udp',
+    '-rtsp_transport', p.transport,
     '-i', p.rtspUrl,
     '-an', '-sn', '-dn',
     '-codec:v', 'libx264',

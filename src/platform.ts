@@ -9,6 +9,7 @@ import { CredentialsStore, SessionStore } from './akuvox/session-store.js';
 import { SipListener, type RingEvent } from './akuvox/sip.js';
 import type { AkuvoxDevice } from './akuvox/types.js';
 import type { CallController } from './camera/streaming-delegate.js';
+import { findLocalCamera, type LocalCameraConfig, type RtspTransport } from './camera/rtsp.js';
 import { buildAudioAnswer } from './sip/sdp.js';
 import type { Region } from './settings.js';
 import { PLATFORM_NAME, PLUGIN_NAME, REGIONS } from './settings.js';
@@ -21,6 +22,7 @@ export interface AkuvoxConfig extends PlatformConfig {
   password?: string;
   unlockSeconds?: number;
   doorbell?: boolean;
+  cameras?: LocalCameraConfig[];
 }
 
 export class AkuvoxSmartPlusPlatform implements DynamicPlatformPlugin {
@@ -65,6 +67,13 @@ export class AkuvoxSmartPlusPlatform implements DynamicPlatformPlugin {
 
   configureAccessory(accessory: PlatformAccessory): void {
     this.cached.set(accessory.UUID, accessory);
+  }
+
+  /** The configured local RTSP source for a door station, if any (preferred over the cloud relay). */
+  getLocalCamera(mac: string): { url: string; transport: RtspTransport } | undefined {
+    const c = findLocalCamera(this.config.cameras, mac);
+    if (!c?.rtspUrl) return undefined;
+    return { url: c.rtspUrl, transport: c.rtspTransport ?? 'tcp' };
   }
 
   private async discover(): Promise<void> {
