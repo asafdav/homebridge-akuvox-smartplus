@@ -35,7 +35,9 @@ interface SessionInfo {
 }
 
 const SNAPSHOT_TIMEOUT_MS = 10_000;
-const SNAPSHOT_REFRESH_MS = 5_000;
+// We serve the cached frame instantly, so a thumbnail up to this old is fine; this bounds how
+// often HomeKit's background polling spawns an ffmpeg grab.
+const SNAPSHOT_REFRESH_MS = 30_000;
 // 1x1 JPEG, returned only before the first real frame exists, so a notification never waits on a fetch.
 const PLACEHOLDER_JPEG = Buffer.from(
   '/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////2wBDAf//////////////////////////////////////////////////////////////////////////////////////wAARCAABAAEDASIAAhEBAxEB/8QAFAABAAAAAAAAAAAAAAAAAAAAAP/EABQQAQAAAAAAAAAAAAAAAAAAAAD/xAAUAQEAAAAAAAAAAAAAAAAAAAAA/8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAwDAQACEQMRAD8AvwA//9k=',
@@ -241,6 +243,14 @@ export class AkuvoxStreamingDelegate implements CameraStreamingDelegate {
       this.calls?.hangup();
     }
     this.pending.delete(sessionID);
+  }
+
+  /** Tear down audio bridges when the door call ends, even if HomeKit keeps the video stream open. */
+  endCalls(): void {
+    for (const [id, bridge] of this.bridges) {
+      bridge.stop();
+      this.bridges.delete(id);
+    }
   }
 
   shutdownStreams(): void {

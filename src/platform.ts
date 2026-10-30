@@ -162,6 +162,9 @@ export class AkuvoxSmartPlusPlatform implements DynamicPlatformPlugin {
       const doorbell = (mac && this.doorbells.get(mac)) || this.only(this.doorbells);
       doorbell?.ring();
     });
+    this.sip.on('callEnded', () => {
+      for (const doorbell of this.doorbells.values()) doorbell.delegate?.endCalls();
+    });
     this.sip.start();
   }
 
