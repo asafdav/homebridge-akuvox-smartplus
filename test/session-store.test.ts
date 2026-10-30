@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { isStale, SessionStore } from '../src/akuvox/session-store.js';
+import { CredentialsStore, isStale, SessionStore } from '../src/akuvox/session-store.js';
 import type { AkuvoxSession } from '../src/akuvox/types.js';
 
 const sample = (obtainedAt: string): AkuvoxSession => ({
@@ -32,6 +32,30 @@ describe('SessionStore', () => {
     store.write(session);
     expect(store.read()).toEqual(session);
     expect(statSync(store.path).mode & 0o777).toBe(0o600);
+  });
+});
+
+describe('CredentialsStore', () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'akuvox-cred-'));
+  });
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('round-trips credentials owner-only', () => {
+    const store = new CredentialsStore(dir);
+    store.write({ email: 'a@b.com', password: 'pw' });
+    expect(store.read()).toEqual({ email: 'a@b.com', password: 'pw' });
+    expect(statSync(join(dir, 'akuvox-smartplus', 'credentials.json')).mode & 0o777).toBe(0o600);
+  });
+
+  it('returns undefined when absent or incomplete', () => {
+    const store = new CredentialsStore(dir);
+    expect(store.read()).toBeUndefined();
+    store.write({ email: 'a@b.com', password: '' });
+    expect(store.read()).toBeUndefined();
   });
 });
 

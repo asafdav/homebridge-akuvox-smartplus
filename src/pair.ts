@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import { AkuvoxCloud } from './akuvox/cloud.js';
 import { SessionManager } from './akuvox/session-manager.js';
-import { SessionStore } from './akuvox/session-store.js';
+import { CredentialsStore, SessionStore } from './akuvox/session-store.js';
 import type { Region } from './settings.js';
 import { PLATFORM_NAME } from './settings.js';
 
@@ -68,6 +68,7 @@ rl.close();
 const sip = await cloud.getSipConfig(result.restServer, result.token);
 const sipServer = await cloud.getSipServer(result.token);
 manager.adopt(result, sip, sipServer);
+new CredentialsStore(dir).write({ email, password });
 
 const devices = await manager.listDevices();
 console.log('\nPaired. Session saved to the Homebridge storage directory.');
