@@ -13,7 +13,7 @@ import type {
 } from 'homebridge';
 import { AudioBridge } from '../audio/audio-bridge.js';
 import { snapshotArgs, videoStreamArgs } from './ffmpeg-args.js';
-import { redactRtsp } from './rtsp.js';
+import { redactRtsp, type StreamSource } from './rtsp.js';
 
 /** Answers and ends the door SIP call on behalf of a camera stream; implemented by the platform. */
 export interface CallController {
@@ -57,7 +57,7 @@ export class AkuvoxStreamingDelegate implements CameraStreamingDelegate {
   constructor(
     private readonly api: API,
     private readonly log: Logging,
-    private readonly getRtspUrl: () => string | undefined,
+    private readonly getSources: () => StreamSource[],
     private readonly calls?: CallController,
   ) {}
 
@@ -118,11 +118,24 @@ export class AkuvoxStreamingDelegate implements CameraStreamingDelegate {
     }
   }
 
-  private fetchSnapshot(width: number, height: number): Promise<Buffer> {
-    const url = this.getRtspUrl();
-    if (!url) return Promise.reject(new Error('camera stream URL unavailable'));
+  private async fetchSnapshot(width: number, height: number): Promise<Buffer> {
+    const sources = this.getSources();
+    if (sources.length === 0) throw new Error('no camera stream source');
+    let lastError: Error | undefined;
+    for (const source of sources) {
+      try {
+        return await this.grabFrame(source, width, height);
+      } catch (error) {
+        lastError = error as Error;
+        this.log.warn(`Snapshot via ${source.label} failed: ${lastError.message}`);
+      }
+    }
+    throw lastError ?? new Error('all snapshot sources failed');
+  }
+
+  private grabFrame(source: StreamSource, width: number, height: number): Promise<Buffer> {
     return new Promise<Buffer>((resolve, reject) => {
-      const proc = spawn('ffmpeg', snapshotArgs(url, width, height), { env: process.env });
+      const proc = spawn('ffmpeg', snapshotArgs(source.url, width, height, source.transport), { env: process.env });
       const chunks: Buffer[] = [];
       let settled = false;
       const finish = (error?: Error, buf?: Buffer) => {
@@ -177,29 +190,48 @@ export class AkuvoxStreamingDelegate implements CameraStreamingDelegate {
 
   private startStream(request: Extract<StreamingRequest, { type: 'start' }>, callback: StreamRequestCallback): void {
     const info = this.pending.get(request.sessionID);
-    const url = this.getRtspUrl();
-    if (!info || !url) {
-      callback(new Error('no prepared session or stream URL'));
+    const sources = this.getSources();
+    if (!info || sources.length === 0) {
+      callback(new Error('no prepared session or stream source'));
       return;
     }
 
-    const v = request.video;
-    const proc = spawn('ffmpeg', videoStreamArgs({
-      rtspUrl: url, width: v.width, height: v.height, fps: v.fps, bitrateKbps: v.max_bit_rate,
-      payloadType: v.pt, ssrc: info.videoSSRC, srtpParams: info.videoSRTP,
-      targetAddress: info.address, targetPort: info.videoPort, mtu: v.mtu,
-    }), { env: process.env });
-    this.ongoing.set(request.sessionID, proc);
-    this.log.info(`Starting camera stream from ${redactRtsp(url)}`);
-
-    this.maybeStartTwoWayAudio(request, info);
-
     let started = false;
-    const ready = () => { if (!started) { started = true; callback(); } };
-    proc.stderr.on('data', (d: Buffer) => { if (d.toString().includes('frame=')) ready(); });
-    proc.on('error', (e) => { this.log.error(`Camera ffmpeg error: ${e.message}`); if (!started) { started = true; callback(e); } });
-    proc.on('close', (code) => { this.ongoing.delete(request.sessionID); if (!started) { started = true; callback(new Error(`camera ffmpeg exited ${code}`)); } });
-    setTimeout(ready, 4000);
+    const done = (error?: Error) => {
+      if (started) return;
+      started = true;
+      if (error) callback(error);
+      else callback();
+    };
+
+    const spawnSource = (index: number): void => {
+      const source = sources[index];
+      if (!source) {
+        done(new Error('all camera stream sources failed'));
+        return;
+      }
+      const v = request.video;
+      const proc = spawn('ffmpeg', videoStreamArgs({
+        rtspUrl: source.url, transport: source.transport, width: v.width, height: v.height, fps: v.fps,
+        bitrateKbps: v.max_bit_rate, payloadType: v.pt, ssrc: info.videoSSRC, srtpParams: info.videoSRTP,
+        targetAddress: info.address, targetPort: info.videoPort, mtu: v.mtu,
+      }), { env: process.env });
+      this.ongoing.set(request.sessionID, proc);
+      this.log.info(`Starting camera stream (${source.label}) from ${redactRtsp(source.url)}`);
+      proc.stderr.on('data', (d: Buffer) => { if (d.toString().includes('frame=')) done(); });
+      proc.on('error', (e) => this.log.error(`Camera ffmpeg error (${source.label}): ${e.message}`));
+      proc.on('close', (code) => {
+        this.ongoing.delete(request.sessionID);
+        // Respawn on the next source only if it died before streaming and wasn't stopped by HomeKit.
+        if (started || !this.pending.has(request.sessionID)) return;
+        this.log.warn(`Camera stream (${source.label}) ended before first frame (code ${code}); trying next source`);
+        spawnSource(index + 1);
+      });
+    };
+
+    spawnSource(0);
+    this.maybeStartTwoWayAudio(request, info);
+    setTimeout(() => done(), 4000);
   }
 
   /** If HomeKit opened the mic during an active ring, answer the call and bridge audio. */

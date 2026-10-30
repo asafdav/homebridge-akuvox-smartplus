@@ -1,6 +1,6 @@
 import type { PlatformAccessory, Service } from 'homebridge';
 import type { AkuvoxDevice } from '../akuvox/types.js';
-import { buildRtspUrl } from '../camera/rtsp.js';
+import { buildRtspUrl, buildStreamSources } from '../camera/rtsp.js';
 import { AkuvoxStreamingDelegate } from '../camera/streaming-delegate.js';
 import type { AkuvoxSmartPlusPlatform } from '../platform.js';
 
@@ -31,10 +31,16 @@ export class CameraDoorbellAccessory {
     this.doorbell = accessory.getService(Service.Doorbell) ?? accessory.addService(Service.Doorbell, device.location);
     accessory.category = this.platform.hap.Categories.VIDEO_DOORBELL;
 
-    if (device.rtspPassword && device.cameraCount > 0) {
+    const hasLocal = !!this.platform.getLocalCamera(device.mac);
+    const hasCloud = !!device.rtspPassword && device.cameraCount > 0;
+    if (hasLocal || hasCloud) {
       this.delegate = new AkuvoxStreamingDelegate(this.platform.api, this.platform.log, () => {
+        const local = this.platform.getLocalCamera(device.mac);
         const info = this.platform.session.getRtspInfo();
-        return buildRtspUrl({ vrtspServer: info.vrtspServer, relayHost: info.relayHost, mac: device.mac, password: device.rtspPassword! });
+        const cloudUrl = device.rtspPassword
+          ? buildRtspUrl({ vrtspServer: info.vrtspServer, relayHost: info.relayHost, mac: device.mac, password: device.rtspPassword })
+          : undefined;
+        return buildStreamSources(local, cloudUrl);
       }, this.platform.callController);
       accessory.configureController(this.delegate.attachController());
     }

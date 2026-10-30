@@ -51,6 +51,34 @@ them interactively and stores only a session token.
 | `unlockSeconds` | How long the lock shows Unlocked before snapping back (the door is a momentary buzzer) |
 | `doorbell` | Register on the intercom PBX for real-time ring notifications |
 | `email`, `password` | Optional. Only needed for automatic full re-login if the token ever fully expires |
+| `cameras` | Optional. Stream a door station from a local RTSP source (e.g. an NVR channel) instead of the Akuvox cloud, with automatic fallback to the cloud |
+
+### Local camera source (optional)
+
+By default the door camera streams through the Akuvox cloud relay. If the intercom is also
+reachable locally — for example as a channel on an NVR — point the plugin at that RTSP URL to
+get a faster, cloud-independent stream. It's tried first, and falls back to the cloud if the
+local source fails. Match it to the door station by MAC (separators and case are ignored).
+
+```json
+{
+  "platform": "AkuvoxSmartPlus",
+  "region": "ecloud",
+  "cameras": [
+    {
+      "mac": "0C:11:05:2A:60:95",
+      "rtspUrl": "rtsp://viewer:password@192.168.1.230:554/cam/realmonitor?channel=1&subtype=1",
+      "rtspTransport": "tcp"
+    }
+  ]
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `mac` | The door station's MAC (match is case- and separator-insensitive) |
+| `rtspUrl` | Local RTSP URL for that camera. Use a low-privilege viewer account |
+| `rtspTransport` | `tcp` (default) or `udp` |
 
 ## Pair (one time)
 

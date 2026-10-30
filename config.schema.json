@@ -50,6 +50,38 @@
         "description": "Register on the intercom PBX to get real-time ring notifications.",
         "type": "boolean",
         "default": true
+      },
+      "cameras": {
+        "title": "Local camera sources (optional)",
+        "description": "Stream a door station from a local RTSP source (e.g. an NVR channel) instead of the Akuvox cloud, with automatic fallback to the cloud. Matched to the door station by MAC.",
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "mac": {
+              "title": "Door station MAC",
+              "description": "The intercom's MAC (separators and case are ignored).",
+              "type": "string",
+              "required": true
+            },
+            "rtspUrl": {
+              "title": "Local RTSP URL",
+              "description": "e.g. rtsp://viewer:pass@192.168.1.230:554/cam/realmonitor?channel=1&subtype=1",
+              "type": "string",
+              "required": true,
+              "x-schema-form": { "type": "password" }
+            },
+            "rtspTransport": {
+              "title": "RTSP transport",
+              "type": "string",
+              "default": "tcp",
+              "oneOf": [
+                { "title": "TCP (recommended)", "enum": ["tcp"] },
+                { "title": "UDP", "enum": ["udp"] }
+              ]
+            }
+          }
+        }
       }
     }
   }
